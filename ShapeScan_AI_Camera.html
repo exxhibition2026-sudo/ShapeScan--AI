@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ShapeScan AI | Educational Shape Explorer</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#151d33; --line:#2a3858; --text:#edf3ff; --muted:#aab8d3; --accent:#70d6c3; --blue:#7da7ff; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui,Segoe UI,Arial,sans-serif; background:linear-gradient(145deg,#0b1020,#111b31); color:var(--text); min-height:100vh; }
+    main { width:min(1000px,94%); margin:0 auto; padding:34px 0 56px; }
+    header { margin-bottom:24px; }
+    .eyebrow { color:var(--accent); font-weight:700; letter-spacing:.12em; text-transform:uppercase; font-size:.78rem; }
+    h1 { margin:.35rem 0; font-size:clamp(2rem,5vw,3.2rem); }
+    header p,.hint { color:var(--muted); line-height:1.55; }
+    .layout { display:grid; grid-template-columns: minmax(0,1.5fr) minmax(260px,1fr); gap:18px; }
+    .card { background:rgba(21,29,51,.94); border:1px solid var(--line); border-radius:18px; padding:18px; box-shadow:0 12px 35px #0003; }
+    .screen { background:#060a13; border:1px solid var(--line); border-radius:13px; min-height:300px; display:grid; place-items:center; overflow:hidden; position:relative; }
+    video,canvas.preview { display:block; width:100%; max-height:520px; object-fit:contain; }
+    .empty { padding:34px 18px; text-align:center; color:var(--muted); }
+    .controls { display:flex; flex-wrap:wrap; gap:9px; margin-top:14px; }
+    button,.upload-label { border:0; border-radius:10px; padding:11px 15px; font-weight:700; cursor:pointer; background:var(--accent); color:#09201d; }
+    button.secondary,.upload-label.secondary { background:#263653; color:var(--text); border:1px solid #3a4d70; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    input[type=file] { display:none; }
+    h2 { margin:0 0 12px; font-size:1.15rem; }
+    .status { margin-top:12px; color:var(--muted); min-height:1.5em; font-size:.92rem; }
+    .result { border:1px solid var(--line); border-radius:12px; padding:13px; margin-top:12px; }
+    .result strong { color:var(--accent); }
+    .notice { color:var(--muted); font-size:.88rem; line-height:1.5; margin-top:14px; }
+    .tag { display:inline-block; padding:4px 8px; border-radius:99px; background:#203e48; color:#aaf2e4; font-size:.78rem; font-weight:700; }
+    @media(max-width:760px) { .layout { grid-template-columns:1fr; } .screen { min-height:240px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Interactive geometry learning</div>
+    <h1>ShapeScan AI <span aria-hidden="true">🔷</span></h1>
+    <p>Use your camera or upload a picture to start examining objects. Capture an object and record your observations about its geometric shape.</p>
+  </header>
+
+  <div class="layout">
+    <section class="card">
+      <h2>Camera & image</h2>
+      <div class="screen" id="screen">
+        <div class="empty" id="empty">📷<br><br>Start the camera or upload an image to begin.</div>
+        <video id="video" autoplay playsinline hidden></video>
+        <canvas id="photo" class="preview" hidden></canvas>
+        <img id="uploaded" alt="Uploaded object preview" style="display:none;max-width:100%;max-height:520px;object-fit:contain">
+      </div>
+      <div class="controls">
+        <button id="startBtn">Start camera</button>
+        <button id="captureBtn" disabled>Capture photo</button>
+        <button id="stopBtn" class="secondary" disabled>Stop camera</button>
+        <label class="upload-label secondary" for="fileInput">Upload image</label>
+        <input id="fileInput" type="file" accept="image/*">
+      </div>
+      <div class="status" id="status" role="status">Camera is off.</div>
+      <p class="notice">Camera access requires your permission and normally works on HTTPS websites (such as GitHub Pages) or on localhost. If prompted, choose Allow.</p>
+    </section>
+
+    <aside class="card">
+      <h2>Shape examination</h2>
+      <span class="tag">Learning worksheet</span>
+      <p class="hint">After capturing or uploading an object, use these prompts to examine its geometry.</p>
+      <div class="result"><strong>1. What shape do you see?</strong><p class="hint">Examples: cube, cuboid, sphere, cylinder, cone, pyramid, prism.</p></div>
+      <div class="result"><strong>2. What features can you observe?</strong><p class="hint">Count visible faces, edges and vertices. Some features may be hidden from the camera.</p></div>
+      <div class="result"><strong>3. Estimate its dimensions</strong><p class="hint">Measure length, width and height with a ruler or a known-size reference object.</p></div>
+      <div class="result"><strong>4. Your observation</strong><textarea id="notes" rows="4" placeholder="Example: It looks like a cuboid. It has rectangular faces..." style="width:100%;margin-top:8px;padding:10px;border-radius:9px;border:1px solid var(--line);background:#0b1020;color:var(--text);font:inherit"></textarea></div>
+      <p class="notice">Important: This starter version provides camera capture and an educational worksheet. It does not yet automatically recognize shapes or calculate real-world dimensions. Those features need a computer-vision model and, for measurements, camera calibration or a reference scale.</p>
+    </aside>
+  </div>
+</main>
+<script>
+(() => {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('photo');
+  const uploaded = document.getElementById('uploaded');
+  const empty = document.getElementById('empty');
+  const status = document.getElementById('status');
+  const startBtn = document.getElementById('startBtn');
+  const captureBtn = document.getElementById('captureBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const fileInput = document.getElementById('fileInput');
+  let stream = null;
+  let uploadUrl = null;
+
+  function showOnly(element) {
+    [video, canvas, uploaded, empty].forEach(node => node.hidden = node !== element);
+    if (element === uploaded) uploaded.style.display = 'block';
+    else uploaded.style.display = 'none';
+  }
+  function stopCamera() {
+    if (stream) stream.getTracks().forEach(track => track.stop());
+    stream = null;
+    video.srcObject = null;
+    captureBtn.disabled = true;
+    stopBtn.disabled = true;
+  }
+  startBtn.addEventListener('click', async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      status.textContent = 'Camera is unavailable in this browser or page context. Open the HTTPS GitHub Pages link and try again.';
+      return;
+    }
+    try {
+      stopCamera();
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      video.srcObject = stream;
+      showOnly(video);
+      captureBtn.disabled = false;
+      stopBtn.disabled = false;
+      status.textContent = 'Camera is on. Point it at an object and select Capture photo.';
+    } catch (error) {
+      status.textContent = error.name === 'NotAllowedError'
+        ? 'Camera permission was denied. Allow camera access in your browser settings and try again.'
+        : 'Could not start the camera: ' + error.message;
+    }
+  });
+  captureBtn.addEventListener('click', () => {
+    if (!stream || !video.videoWidth) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    showOnly(canvas);
+    status.textContent = 'Photo captured. You can examine it or take another photo.';
+  });
+  stopBtn.addEventListener('click', () => {
+    stopCamera();
+    showOnly(empty);
+    status.textContent = 'Camera stopped.';
+  });
+  fileInput.addEventListener('change', event => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    if (uploadUrl) URL.revokeObjectURL(uploadUrl);
+    uploadUrl = URL.createObjectURL(file);
+    uploaded.src = uploadUrl;
+    stopCamera();
+    showOnly(uploaded);
+    status.textContent = 'Image loaded: ' + file.name;
+  });
+  window.addEventListener('pagehide', stopCamera);
+})();
+</script>
+</body>
+</html>
